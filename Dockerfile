@@ -5,7 +5,8 @@ RUN apk add --no-cache \
     bash \
     curl \
     jq \
-    tzdata
+    tzdata \
+    procps
 
 # Create non-root user (UID 1000, GID 1000 - common default)
 RUN addgroup -g 1000 ddns && \

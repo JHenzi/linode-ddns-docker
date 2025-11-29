@@ -1,15 +1,18 @@
 # Linode Dynamic DNS Updater
 
-A lightweight Docker service that automatically updates Linode DNS A records when your public IP address changes.
+**Want a Docker container to update your Linode Dynamic DNS entries?** This lightweight service automatically keeps your Linode DNS A records in sync with your changing public IP address.
 
 ## Features
 
-- ✅ Automatic IP detection and DNS updates
-- ✅ Lightweight Alpine-based Docker image
-- ✅ Continuous monitoring mode
-- ✅ Proper error handling and logging
-- ✅ Graceful shutdown handling
-- ✅ Health checks
+- ✅ **Automatic IP Detection** - Monitors your public IP using multiple reliable sources
+- ✅ **Smart Baseline** - On first run, fetches current DNS IP to avoid unnecessary updates
+- ✅ **Root Domain Support** - Update root domains (example.com) or subdomains (www.example.com)
+- ✅ **Lightweight** - Minimal Alpine-based Docker image (~15MB)
+- ✅ **Non-Root Container** - Runs securely as non-root user (UID 1000)
+- ✅ **Continuous Monitoring** - Configurable check interval (default: 5 minutes)
+- ✅ **Error Handling** - Proper logging, retries, and graceful error recovery
+- ✅ **Health Checks** - Built-in Docker healthcheck monitoring
+- ✅ **Easy Setup** - Interactive setup script with domain validation
 
 ## Quick Start
 
@@ -28,13 +31,13 @@ A lightweight Docker service that automatically updates Linode DNS A records whe
    ```
    
    The setup script will:
-   - Fetch your Linode domains
+   - Fetch and display your Linode domains
    - Prompt you to configure domain/hostname pairs
    - Validate domains exist in your Linode account
    - Build the Docker image
    - Optionally start the container
 
-That's it! The service will automatically update your DNS records when your IP changes.
+3. **That's it!** The service automatically updates your DNS records when your IP changes.
 
 ## Configuration
 
@@ -42,23 +45,25 @@ That's it! The service will automatically update your DNS records when your IP c
 
 - `PAT` (required): Your Linode API Personal Access Token
 - `CONFIG_DIR` (default: `/data`): Directory for config and state files
-- `CHECK_INTERVAL` (default: `300`): Seconds between IP checks in continuous mode
+- `CHECK_INTERVAL` (default: `300`): Seconds between IP checks in continuous mode (must be positive integer)
 - `CONTINUOUS_MODE` (default: `true`): Run continuously vs. one-time execution
 
 ### Config File Format
 
-The config file (`linode-ddns.conf`) should contain:
+The config file (`data/linode-ddns.conf`) is created by the setup script:
+
 ```bash
 DOMAINS=(
-  "domain.com,hostname1"
-  "domain.com,hostname2"
-  "another.com,subdomain"
+  "example.com,"           # Root domain (example.com)
+  "example.com,www"        # Subdomain (www.example.com)
+  "another.com,api"        # Subdomain (api.another.com)
 )
 ```
 
-Format: `"DOMAIN,HOSTNAME"` where:
+**Format:** `"DOMAIN,HOSTNAME"` where:
 - `DOMAIN` is your Linode domain (e.g., `example.com`)
-- `HOSTNAME` is the subdomain (e.g., `www` for `www.example.com`)
+- `HOSTNAME` is the subdomain part (e.g., `www` for `www.example.com`)
+- **Empty HOSTNAME** (trailing comma) means root domain (e.g., `"example.com,"` for `example.com`)
 
 ## Usage
 
@@ -69,7 +74,7 @@ Format: `"DOMAIN,HOSTNAME"` where:
 docker-compose up -d
 
 # View logs
-docker-compose logs -f
+docker-compose logs -f linode-ddns
 
 # Stop service
 docker-compose down
@@ -97,6 +102,22 @@ docker run --rm \
   /usr/local/bin/update.sh
 ```
 
+## How It Works
+
+1. **First Run:**
+   - Fetches current DNS IP from Linode API as baseline
+   - If DNS already matches current public IP → skips update
+   - If DNS differs → updates all configured records
+
+2. **Subsequent Runs:**
+   - Compares current public IP with last known IP (from `lastip` file)
+   - If unchanged → skips update
+   - If changed → updates all configured DNS A records via Linode API
+
+3. **Continuous Mode:**
+   - Repeats check every `CHECK_INTERVAL` seconds
+   - Handles errors gracefully and continues running
+
 ## Files
 
 - `setup.sh` - Interactive setup script (run this first!)
@@ -105,13 +126,6 @@ docker run --rm \
 - `docker-compose.yml` - Docker Compose configuration
 - `data/linode-ddns.conf` - Domain configuration (created by setup.sh)
 - `data/linode-ddns.lastip` - Last known IP address (auto-created)
-
-## How It Works
-
-1. Script checks your public IP using multiple reliable sources
-2. Compares with last known IP (stored in `lastip` file)
-3. If IP changed, updates all configured DNS A records via Linode API
-4. In continuous mode, repeats every `CHECK_INTERVAL` seconds
 
 ## Troubleshooting
 
@@ -130,24 +144,41 @@ chown -R 1000:1000 data/
 chmod -R 775 data/
 ```
 
-### Check logs
+### Check Container Status
+
 ```bash
+# View logs
 docker-compose logs -f linode-ddns
+
+# Check if running as non-root
+docker exec linode-ddns id
+# Should show: uid=1000(ddns) gid=1000(ddns)
+
+# Check health status
+docker ps --filter "name=linode-ddns"
 ```
 
-### Verify configuration
+### Verify Configuration
+
 ```bash
+# View config
 cat data/linode-ddns.conf
+
+# View last known IP
+cat data/linode-ddns.lastip
 ```
 
 ### Reconfigure
+
 ```bash
 # Run setup again to add/change domains
 ./setup.sh
 ```
 
-### Test manually
+### Test Manually
+
 ```bash
+# Test update script directly
 docker run --rm \
   -e PAT="your_token" \
   -v $(pwd)/data:/data \
@@ -157,7 +188,22 @@ docker run --rm \
 
 ## Security Notes
 
-- Never commit `.env` files or API tokens to version control
-- The `PAT` environment variable contains sensitive credentials
-- Consider using Docker secrets or a secrets manager in production
+- ✅ Container runs as **non-root user** (UID 1000)
+- ✅ Never commit `.env` files or API tokens to version control
+- ✅ The `PAT` environment variable contains sensitive credentials
+- ✅ Consider using Docker secrets or a secrets manager in production
+- ✅ API tokens are only used for Linode DNS API calls
 
+## Requirements
+
+- Docker and Docker Compose (or just Docker)
+- Linode account with API Personal Access Token
+- Domains managed in Linode DNS Manager
+
+## License
+
+This project is provided as-is for personal use and is released under the GNU GPL.
+
+It is **not affiliated with The Henzi Foundation/The Frankie Fund**, a charitable organization dedicated to providing financial support to families facing the unexpected loss of a child.
+
+If you are looking for more information on the foundation or would like to support its mission of covering funeral and final expenses for children, please visit: [https://henzi.org](https://henzi.org)

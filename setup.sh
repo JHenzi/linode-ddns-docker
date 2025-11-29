@@ -37,26 +37,29 @@ api_call() {
   local url="$2"
   local data="${3:-}"
   local http_code
+  local response_file="${TMPDIR:-/tmp}/linode_response_$$.json"
   
   if [[ -n "$data" ]]; then
-    http_code=$(curl -s -w "%{http_code}" -o /tmp/linode_response.json \
+    http_code=$(curl -s -w "%{http_code}" -o "$response_file" \
       -X "$method" \
       -H "Authorization: Bearer $PAT" \
       -H "Content-Type: application/json" \
       -d "$data" \
       "$url")
   else
-    http_code=$(curl -s -w "%{http_code}" -o /tmp/linode_response.json \
+    http_code=$(curl -s -w "%{http_code}" -o "$response_file" \
       -H "Authorization: Bearer $PAT" \
       "$url")
   fi
   
   if [[ "$http_code" -ge 200 ]] && [[ "$http_code" -lt 300 ]]; then
-    cat /tmp/linode_response.json
+    cat "$response_file"
+    rm -f "$response_file"
     return 0
   else
     echo "ERROR: API call failed with HTTP $http_code" >&2
-    [[ -f /tmp/linode_response.json ]] && cat /tmp/linode_response.json >&2
+    [[ -f "$response_file" ]] && cat "$response_file" >&2
+    rm -f "$response_file"
     return 1
   fi
 }
