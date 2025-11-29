@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  linode-ddns:
+    build: .
+    container_name: linode-ddns
+    restart: unless-stopped
+    environment:
+      - PAT=${PAT}
+      - CONFIG_DIR=/data
+      - CHECK_INTERVAL=300
+      - CONTINUOUS_MODE=true
+    volumes:
+      - ./data:/data
+    # Container runs as non-root user (ddns:ddns, UID/GID 1000)
+    # Ensure data directory is owned by UID 1000 or is world-writable
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "update.sh"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
