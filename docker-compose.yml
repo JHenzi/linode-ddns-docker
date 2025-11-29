@@ -12,8 +12,8 @@ services:
       - CONTINUOUS_MODE=true
     volumes:
       - ./data:/data
-    # Container runs as non-root user (ddns:ddns, UID/GID 1000)
-    # Ensure data directory is owned by UID 1000 or is world-writable
+    # Explicitly run as non-root user (UID/GID 1000)
+    user: "1000:1000"
     healthcheck:
       test: ["CMD", "pgrep", "-f", "update.sh"]
       interval: 60s

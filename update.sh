@@ -121,6 +121,45 @@ get_record_id() {
   echo "$result" | jq -r ".data[] | select(.type==\"A\" and .name==\"$name\") | .id" | head -n1
 }
 
+get_record_ip() {
+  local domain_id="$1" name="$2"
+  local result
+  result=$(api_call "GET" "$API_URL/domains/$domain_id/records" || echo "")
+  if [[ -z "$result" ]]; then
+    return 1
+  fi
+  echo "$result" | jq -r ".data[] | select(.type==\"A\" and .name==\"$name\") | .target" | head -n1
+}
+
+get_dns_baseline_ip() {
+  # On first run, fetch the current DNS IP from the first configured domain
+  # This gives us a baseline to compare against
+  local first_entry="${DOMAINS[0]}"
+  if [[ -z "$first_entry" ]]; then
+    return 1
+  fi
+  
+  local domain hostname
+  domain=$(echo "$first_entry" | cut -d',' -f1)
+  hostname=$(echo "$first_entry" | cut -d',' -f2)
+  
+  local domain_id
+  domain_id=$(get_domain_id "$domain")
+  if [[ -z "$domain_id" ]] || [[ "$domain_id" == "null" ]]; then
+    return 1
+  fi
+  
+  local dns_ip
+  dns_ip=$(get_record_ip "$domain_id" "$hostname")
+  if [[ -z "$dns_ip" ]] || [[ "$dns_ip" == "null" ]]; then
+    # Record doesn't exist yet, return empty
+    return 1
+  fi
+  
+  echo "$dns_ip"
+  return 0
+}
+
 
 # ----------------------------
 # Signal handling for graceful shutdown
@@ -166,6 +205,26 @@ run_update() {
 
   local last_ip=""
   [[ -f "$LAST_IP_FILE" ]] && last_ip=$(cat "$LAST_IP_FILE")
+
+  # On first run (no lastip file), fetch current DNS IP as baseline
+  if [[ -z "$last_ip" ]]; then
+    log "First run detected. Fetching current DNS IP as baseline..."
+    local dns_baseline
+    dns_baseline=$(get_dns_baseline_ip)
+    if [[ -n "$dns_baseline" ]] && [[ "$dns_baseline" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      last_ip="$dns_baseline"
+      log "Current DNS IP: $last_ip"
+      
+      # If DNS already matches current IP, just save it and skip update
+      if [[ "$current_ip" = "$last_ip" ]]; then
+        log "DNS IP matches current public IP ($current_ip). No update needed."
+        echo "$current_ip" > "$LAST_IP_FILE"
+        return 0
+      fi
+    else
+      log "Could not fetch DNS baseline (record may not exist yet). Proceeding with update."
+    fi
+  fi
 
   if [[ "$current_ip" = "$last_ip" ]]; then
     log "IP unchanged ($current_ip). Skipping update."
