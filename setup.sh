@@ -94,6 +94,147 @@ validate_domain() {
   return 0
 }
 
+get_public_ip() {
+  # reliable sources only
+  local providers=("https://ipinfo.io/ip" "https://checkip.amazonaws.com" "https://api.ipify.org")
+  for url in "${providers[@]}"; do
+    local ip
+    ip=$(curl -4 -s --max-time 10 --fail "$url" 2>/dev/null | tr -d '[:space:]' || true)
+    if [[ -n "$ip" ]] && [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "$ip"
+      return 0
+    fi
+  done
+  return 1
+}
+
+get_all_a_records() {
+  local domain_id="$1"
+  local result
+  result=$(api_call "GET" "$API_URL/domains/$domain_id/records" || echo "")
+  if [[ -z "$result" ]]; then
+    return 1
+  fi
+  echo "$result" | jq -r '.data[] | select(.type=="A") | "\(.name)|\(.target)"'
+}
+
+discover_domains_by_ip() {
+  echo "=== Discovering Domains Matching Current IP ==="
+  echo ""
+  
+  # Get current public IP
+  echo "Fetching current public IP..."
+  local current_ip
+  current_ip=$(get_public_ip)
+  if [[ -z "$current_ip" ]]; then
+    echo "ERROR: Could not determine public IP."
+    return 1
+  fi
+  echo "Current public IP: $current_ip"
+  echo ""
+  
+  # Get all domains
+  echo "Fetching domains from Linode..."
+  local domains_result
+  domains_result=$(api_call "GET" "$API_URL/domains" || echo "")
+  if [[ -z "$domains_result" ]]; then
+    echo "ERROR: Failed to fetch domains from Linode API."
+    return 1
+  fi
+  
+  local matching_domains=()
+  local domain_count
+  domain_count=$(echo "$domains_result" | jq '.data | length')
+  echo "Found $domain_count domain(s). Checking A records..."
+  echo ""
+  
+  # For each domain, check A records
+  local domain_json
+  while IFS= read -r domain_json; do
+    [[ -z "$domain_json" ]] && continue
+    
+    local domain domain_id
+    domain=$(echo "$domain_json" | jq -r '.domain')
+    domain_id=$(echo "$domain_json" | jq -r '.id')
+    
+    echo "Checking $domain..."
+    local a_records
+    a_records=$(get_all_a_records "$domain_id")
+    
+    if [[ -n "$a_records" ]]; then
+      while IFS='|' read -r name target; do
+        [[ -z "$target" ]] && continue
+        if [[ "$target" == "$current_ip" ]]; then
+          # Found a match!
+          if [[ -z "$name" ]] || [[ "$name" == "null" ]]; then
+            # Root domain
+            matching_domains+=("$domain,")
+            echo "  ✓ Found: $domain (root domain)"
+          else
+            # Subdomain
+            matching_domains+=("$domain,$name")
+            echo "  ✓ Found: $name.$domain"
+          fi
+        fi
+      done <<< "$a_records"
+    fi
+  done < <(echo "$domains_result" | jq -c '.data[]')
+  
+  echo ""
+  if [[ ${#matching_domains[@]} -eq 0 ]]; then
+    echo "No A records found matching IP $current_ip"
+    return 1
+  fi
+  
+  echo "Found ${#matching_domains[@]} matching record(s):"
+  for entry in "${matching_domains[@]}"; do
+    local domain hostname
+    domain=$(echo "$entry" | cut -d',' -f1)
+    hostname=$(echo "$entry" | cut -d',' -f2)
+    if [[ -z "$hostname" ]]; then
+      echo "  - $domain (root domain)"
+    else
+      echo "  - $hostname.$domain"
+    fi
+  done
+  echo ""
+  
+  # Ask to update config
+  read -r -p "Update config file with these domains? [Y/n] " response
+  if [[ "$response" =~ ^[Nn]$ ]]; then
+    echo "Cancelled."
+    return 0
+  fi
+  
+  # Create config directory
+  mkdir -p "$CONFIG_DIR"
+  
+  # Fix permissions if needed
+  if [[ -d "$CONFIG_DIR" ]] && [[ ! -w "$CONFIG_DIR" ]]; then
+    if sudo chown -R "$(id -u):$(id -g)" "$CONFIG_DIR" 2>/dev/null; then
+      echo "✓ Fixed permissions"
+    fi
+  fi
+  
+  # Save config
+  echo "Updating $CONFIG_FILE..."
+  {
+    echo "# Linode DDNS Configuration"
+    echo "# Format: DOMAIN,HOSTNAME"
+    echo "# Empty HOSTNAME means root domain (e.g. \"example.com,\" for example.com)"
+    echo "# Non-empty HOSTNAME means subdomain (e.g. \"example.com,www\" for www.example.com)"
+    echo "# Auto-discovered on $(date '+%Y-%m-%d %H:%M:%S') for IP: $current_ip"
+    echo "DOMAINS=("
+    for entry in "${matching_domains[@]}"; do
+      echo "  \"$entry\""
+    done
+    echo ")"
+  } > "$CONFIG_FILE"
+  
+  echo "✓ Config updated with ${#matching_domains[@]} domain(s)"
+  return 0
+}
+
 # ----------------------------
 # Setup configuration
 # ----------------------------
@@ -272,6 +413,12 @@ start_docker() {
 # Main execution
 # ----------------------------
 main() {
+  # Check for --discover flag
+  if [[ "${1:-}" == "--discover" ]]; then
+    discover_domains_by_ip
+    exit $?
+  fi
+  
   # Check if config exists
   if [[ -f "$CONFIG_FILE" ]]; then
     echo "Configuration file already exists: $CONFIG_FILE"

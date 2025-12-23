@@ -1,10 +1,13 @@
 # Linode Dynamic DNS Updater
 
-**Want a Docker container to update your Linode Dynamic DNS entries?** This lightweight service automatically keeps your Linode DNS A records in sync with your changing public IP address.
+**Want a Docker container to update your Linode Dynamic DNS entries?** This lightweight service automatically keeps your Linode DNS A records in sync with your changing public IP address. Perfect for home servers, VPNs, and any service with a dynamic IP that needs reliable Linode Dynamic DNS updates.
+
+A simple, automated solution for managing Linode Dynamic DNS records when your IP address changes. No manual DNS updates required - this Docker container handles everything automatically.
 
 ## Features
 
 - ✅ **Automatic IP Detection** - Monitors your public IP using multiple reliable sources
+- ✅ **Auto-Discovery** - Automatically discover and configure Linode Dynamic DNS records matching your current IP
 - ✅ **Smart Baseline** - On first run, fetches current DNS IP to avoid unnecessary updates
 - ✅ **Root Domain Support** - Update root domains (example.com) or subdomains (www.example.com)
 - ✅ **Lightweight** - Minimal Alpine-based Docker image (~15MB)
@@ -37,7 +40,13 @@
    - Build the Docker image
    - Optionally start the container
 
-3. **That's it!** The service automatically updates your DNS records when your IP changes.
+   **Or auto-discover domains matching your current IP:**
+   ```bash
+   ./setup.sh --discover
+   ```
+   This automatically finds all Linode Dynamic DNS A records pointing to your current public IP and updates the config file.
+
+3. **That's it!** The service automatically updates your Linode Dynamic DNS records when your IP changes.
 
 ## Configuration
 
@@ -50,7 +59,7 @@
 
 ### Config File Format
 
-The config file (`data/linode-ddns.conf`) is created by the setup script:
+The config file (`data/linode-ddns.conf`) is created by the setup script or auto-discovered with `./setup.sh --discover`:
 
 ```bash
 DOMAINS=(
@@ -64,6 +73,8 @@ DOMAINS=(
 - `DOMAIN` is your Linode domain (e.g., `example.com`)
 - `HOSTNAME` is the subdomain part (e.g., `www` for `www.example.com`)
 - **Empty HOSTNAME** (trailing comma) means root domain (e.g., `"example.com,"` for `example.com`)
+
+**Manual Editing:** You can also manually edit `data/linode-ddns.conf` to add or remove Linode Dynamic DNS entries. The container will pick up changes on the next check cycle (or restart the container to apply immediately).
 
 ## Usage
 
@@ -104,19 +115,22 @@ docker run --rm \
 
 ## How It Works
 
+The Linode Dynamic DNS updater works by continuously monitoring your public IP address and automatically updating your Linode DNS A records when changes are detected.
+
 1. **First Run:**
    - Fetches current DNS IP from Linode API as baseline
    - If DNS already matches current public IP → skips update
-   - If DNS differs → updates all configured records
+   - If DNS differs → updates all configured Linode Dynamic DNS records
 
 2. **Subsequent Runs:**
    - Compares current public IP with last known IP (from `lastip` file)
    - If unchanged → skips update
-   - If changed → updates all configured DNS A records via Linode API
+   - If changed → updates all configured Linode Dynamic DNS A records via Linode API
 
 3. **Continuous Mode:**
    - Repeats check every `CHECK_INTERVAL` seconds
    - Handles errors gracefully and continues running
+   - Ensures your Linode Dynamic DNS stays in sync with IP changes
 
 ## Files
 
@@ -171,9 +185,14 @@ cat data/linode-ddns.lastip
 ### Reconfigure
 
 ```bash
-# Run setup again to add/change domains
+# Run setup again to add/change domains manually
 ./setup.sh
+
+# Or auto-discover domains matching your current IP
+./setup.sh --discover
 ```
+
+The `--discover` option is perfect for quickly syncing your Linode Dynamic DNS configuration with existing A records that point to your current IP address. It scans all your Linode domains and finds matching A records automatically.
 
 ### Test Manually
 
@@ -194,11 +213,22 @@ docker run --rm \
 - ✅ Consider using Docker secrets or a secrets manager in production
 - ✅ API tokens are only used for Linode DNS API calls
 
+## Use Cases
+
+This Linode Dynamic DNS updater is perfect for:
+
+- **Home Servers** - Keep your home server accessible via domain name even with dynamic IP
+- **VPN Services** - Automatically update DNS for VPN endpoints
+- **Remote Access** - Maintain reliable access to services behind dynamic IPs
+- **Self-Hosted Services** - Keep your self-hosted applications accessible via Linode Dynamic DNS
+- **Development/Testing** - Quickly sync DNS for development environments
+
 ## Requirements
 
 - Docker and Docker Compose (or just Docker)
 - Linode account with API Personal Access Token
 - Domains managed in Linode DNS Manager
+- IPv4 public IP address (IPv6 not currently supported)
 
 ## License
 

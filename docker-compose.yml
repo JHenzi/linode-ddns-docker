@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   linode-ddns:
     build: .
@@ -14,6 +12,11 @@ services:
       - ./data:/data
     # Explicitly run as non-root user (UID/GID 1000)
     user: "1000:1000"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "1"
     healthcheck:
       test: ["CMD", "pgrep", "-f", "update.sh"]
       interval: 60s
